@@ -36,12 +36,12 @@ let update x v s = fun y -> if x = y then v else s y
 let s = update "x" 1 @@ update "y" 2 @@ update "z" 3 @@ update "t" 4 empty
 
 (* Some testing; comment this definition out when submitting the solution. *)
-let _ =
+(* let _ =
   List.iter
     (fun x ->
        try  Printf.printf "%s=%d\n" x @@ s x
        with Failure s -> Printf.printf "%s\n" s
-    ) ["x"; "a"; "y"; "z"; "t"; "b"]
+    ) ["x"; "a"; "y"; "z"; "t"; "b"] *)
 
 (* Expression evaluator
 
@@ -50,5 +50,27 @@ let _ =
    Takes a state and an expression, and returns the value of the expression in 
    the given state.
 *)
-let eval = failwith "Not implemented yet"
+let rec eval s e = 
+  let bool_to_int b = if b then 1 else 0 in
+  let int_to_bool i = if i == 0 then false else true in
+  let helper binop l r = 
+    match binop with
+      | "!!"  -> bool_to_int ((int_to_bool l) || (int_to_bool r))
+      | "&&"  -> bool_to_int ((int_to_bool l) && (int_to_bool r))
+      | "=="  -> bool_to_int (l == r)
+      | "!="  -> bool_to_int (l != r)
+      | "<"   -> bool_to_int (l < r)
+      | "<="  -> bool_to_int (l <= r)
+      | ">"   -> bool_to_int (l > r)
+      | ">="  -> bool_to_int (l >= r)
+      | "+"   -> l + r
+      | "-"   -> l - r
+      | "*"   -> l * r
+      | "/"   -> l / r
+      | "%"   -> l mod r
+      | _     -> failwith "Wrong binary operator" in
+  match e with
+    | Const x          -> x
+    | Var v            -> s v
+    | Binop (op, l, r) -> helper op (eval s l) (eval s r) 
                     
