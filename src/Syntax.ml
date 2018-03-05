@@ -2,6 +2,7 @@
    The library provides "@type ..." syntax extension and plugins like show, etc.
 *)
 open GT 
+open List
     
 (* Simple expressions: syntax and semantics *)
 module Expr =
@@ -41,7 +42,30 @@ module Expr =
        Takes a state and an expression, and returns the value of the expression in 
        the given state.
     *)
-    let eval _ = failwith "Not implemented yet"
+    let rec eval s e = 
+      let bool_to_int b = if b then 1 else 0 in
+      let int_to_bool i = if i == 0 then false else true in
+      let helper binop l r = 
+        match binop with
+          | "!!"  -> bool_to_int ((int_to_bool l) || (int_to_bool r))
+          | "&&"  -> bool_to_int ((int_to_bool l) && (int_to_bool r))
+          | "=="  -> bool_to_int (l == r)
+          | "!="  -> bool_to_int (l != r)
+          | "<"   -> bool_to_int (l < r)
+          | "<="  -> bool_to_int (l <= r)
+          | ">"   -> bool_to_int (l > r)
+          | ">="  -> bool_to_int (l >= r)
+          | "+"   -> l + r
+          | "-"   -> l - r
+          | "*"   -> l * r
+          | "/"   -> l / r
+          | "%"   -> l mod r
+          | _     -> failwith "Wrong binary operator" in
+      match e with
+        | Const x          -> x
+        | Var v            -> s v
+        | Binop (op, l, r) -> helper op (eval s l) (eval s r) 
+
 
   end
                     
@@ -65,8 +89,21 @@ module Stmt =
 
        Takes a configuration and a statement, and returns another configuration
     *)
-    let eval _ = failwith "Not implemented yet"
-                                                         
+    let rec eval c st = 
+      let c = (state, input, output) in
+      match st with
+        | Read var           -> (
+            fun x -> if x == var then hd input else state x,
+            tl input,
+            output
+          )
+        | Write expr         -> (state, input, cons (Expr.eval state expr) output)
+        | Assign (var, expr) -> (
+            fun x -> if x == var then (Expr.eval state expr) else state x,
+            input,
+            output
+          )
+        | Seq (st1, st2)     -> eval (eval c st1) st2    
   end
 
 (* The top-level definitions *)
