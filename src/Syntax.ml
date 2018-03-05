@@ -94,10 +94,10 @@ module Stmt =
       match st with
         | Read var           -> 
             let (x :: input') = input in
-            ((fun y -> if y == var then x else state y), input', output)
+            (Expr.update var x state, input', output)
         | Write expr         -> (state, input, Expr.eval state expr :: output)
         | Assign (var, expr) -> (
-            (fun x -> if x == var then Expr.eval state expr else state x),
+            Expr.update var (Expr.eval state expr) state,
             input,
             output
           )

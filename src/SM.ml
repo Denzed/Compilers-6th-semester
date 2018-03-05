@@ -48,7 +48,7 @@ let eval c p =
         let (state, input, output) = config in
         match ins with
             | BINOP op -> 
-                let (l :: r :: stack') = stack in 
+                let (r :: l :: stack') = stack in 
                 (eval_binop op l r :: stack', config)
             | CONST x  -> (x :: stack, config)
             | READ     -> 
@@ -62,7 +62,7 @@ let eval c p =
                 let (x :: stack') = stack in 
                 (
                     stack', 
-                    ((fun y -> if y == var then x else state y), input, output)
+                    (Syntax.Expr.update var x state, input, output)
                 ) in
     fold_left eval_insn c p
 
