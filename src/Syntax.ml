@@ -90,16 +90,14 @@ module Stmt =
        Takes a configuration and a statement, and returns another configuration
     *)
     let rec eval c st = 
-      let c = (state, input, output) in
+      let (state, input, output) = c in
       match st with
-        | Read var           -> (
-            fun x -> if x == var then hd input else state x,
-            tl input,
-            output
-          )
-        | Write expr         -> (state, input, cons (Expr.eval state expr) output)
+        | Read var           -> 
+            let (x :: input') = input in
+            ((fun y -> if y == var then x else state y), input', output)
+        | Write expr         -> (state, input, Expr.eval state expr :: output)
         | Assign (var, expr) -> (
-            fun x -> if x == var then (Expr.eval state expr) else state x,
+            (fun x -> if x == var then Expr.eval state expr else state x),
             input,
             output
           )

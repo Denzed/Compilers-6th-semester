@@ -1,4 +1,5 @@
-open GT       
+open GT
+open List
        
 (* The type for the stack machine instructions *)
 @type insn =
@@ -23,10 +24,10 @@ type config = int list * Syntax.Stmt.config
 
    Takes a configuration and a program, and returns a configuration as a result
  *)                         
-let rec eval c p = 
-    let bool_to_int b = if b then 1 else 0 in
-    let int_to_bool i = if i == 0 then false else true in
+let eval c p = 
     let eval_binop binop l r = 
+        let bool_to_int b = if b then 1 else 0 in
+        let int_to_bool i = if i == 0 then false else true in
         match binop with
             | "!!"  -> bool_to_int ((int_to_bool l) || (int_to_bool r))
             | "&&"  -> bool_to_int ((int_to_bool l) && (int_to_bool r))
@@ -42,23 +43,28 @@ let rec eval c p =
             | "/"   -> l / r
             | "%"   -> l mod r
             | _     -> failwith "Wrong binary operator" in
-    if length p == 0 then 
-        c 
-    else 
-        let (stack, config@(state, input, output)) = c in
-        let (ins :: p') = p in
-        let c' = 
-            match ins with
-                | BINOP op -> let (l :: r :: rest) = stack in (eval_binop op l r :: rest, config)
-                | CONST x  -> (x :: stack, config)
-                | READ     -> let (x :: rest) = input in (x :: stack, (state, rest, output))
-                | WRITE    -> let (x :: rest) = stack in (rest, (state, input, x :: output))
-                | LD var   -> (state var :: rest, input, output)
-                | ST var   -> let (x :: rest) = stack in (
-                        rest, 
-                        (fun y -> if y == var then x else state y, input, output)
-                    ) in
-        eval c' p'
+    let eval_insn c ins = 
+        let (stack, config) = c in
+        let (state, input, output) = config in
+        match ins with
+            | BINOP op -> 
+                let (l :: r :: stack') = stack in 
+                (eval_binop op l r :: stack', config)
+            | CONST x  -> (x :: stack, config)
+            | READ     -> 
+                let (x :: input') = input in 
+                (x :: stack, (state, input', output))
+            | WRITE    -> 
+                let (x :: stack') = stack in 
+                (stack', (state, input, x :: output))
+            | LD var   -> (state var :: stack, (state, input, output))
+            | ST var   -> 
+                let (x :: stack') = stack in 
+                (
+                    stack', 
+                    ((fun y -> if y == var then x else state y), input, output)
+                ) in
+    fold_left eval_insn c p
 
 (* Top-level evaluation
 
@@ -76,14 +82,14 @@ let run i p = let (_, (_, _, o)) = eval ([], (Syntax.Expr.empty, i, [])) p in o
    stack machine
  *)
 
-let compile st = 
-    let compile_expr expr = 
+let rec compile st = 
+    let rec compile_expr expr = 
         match expr with
-            | Const c          -> [CONST c]
-            | Var x            -> [LD x]
-            | Binop (op, l, r) -> compile_expr l @ compile_expr r @ [BINOP op] in
+            | Syntax.Expr.Const c          -> [CONST c]
+            | Syntax.Expr.Var x            -> [LD x]
+            | Syntax.Expr.Binop (op, l, r) -> compile_expr l @ compile_expr r @ [BINOP op] in
     match st with
-        | Read var        -> [READ; ST var]
-        | Write expr      -> compile_expr expr @ [WRITE]
-        | Assign var expr -> compile_expr expr @ [ST var]
-        | Seq (st1, st2)  -> compile st1 @ compile st2
+        | Syntax.Stmt.Read var           -> [READ; ST var]
+        | Syntax.Stmt.Write expr         -> compile_expr expr @ [WRITE]
+        | Syntax.Stmt.Assign (var, expr) -> compile_expr expr @ [ST var]
+        | Syntax.Stmt.Seq (st1, st2)     -> compile st1 @ compile st2
