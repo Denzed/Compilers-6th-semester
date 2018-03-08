@@ -44,29 +44,31 @@ module Expr =
        Takes a state and an expression, and returns the value of the expression in 
        the given state.
     *)
-    let rec eval s e = 
+    let get_binop_function binop =
       let bool_to_int b = if b then 1 else 0 in
       let int_to_bool i = if i == 0 then false else true in
-      let helper binop l r = 
+      fun l r ->
         match binop with
-          | "!!"  -> bool_to_int ((int_to_bool l) || (int_to_bool r))
-          | "&&"  -> bool_to_int ((int_to_bool l) && (int_to_bool r))
-          | "=="  -> bool_to_int (l == r)
-          | "!="  -> bool_to_int (l != r)
-          | "<"   -> bool_to_int (l < r)
-          | "<="  -> bool_to_int (l <= r)
-          | ">"   -> bool_to_int (l > r)
-          | ">="  -> bool_to_int (l >= r)
-          | "+"   -> l + r
-          | "-"   -> l - r
-          | "*"   -> l * r
-          | "/"   -> l / r
-          | "%"   -> l mod r
-          | _     -> failwith "Wrong binary operator" in
+            | "!!"  -> bool_to_int ((int_to_bool l) || (int_to_bool r))
+            | "&&"  -> bool_to_int ((int_to_bool l) && (int_to_bool r))
+            | "=="  -> bool_to_int (l == r)
+            | "!="  -> bool_to_int (l != r)
+            | "<"   -> bool_to_int (l < r)
+            | "<="  -> bool_to_int (l <= r)
+            | ">"   -> bool_to_int (l > r)
+            | ">="  -> bool_to_int (l >= r)
+            | "+"   -> l + r
+            | "-"   -> l - r
+            | "*"   -> l * r
+            | "/"   -> l / r
+            | "%"   -> l mod r
+            | _     -> failwith "Wrong binary operator"
+
+    let rec eval s e = 
       match e with
         | Const x          -> x
         | Var v            -> s v
-        | Binop (op, l, r) -> helper op (eval s l) (eval s r) 
+        | Binop (op, l, r) -> get_binop_function op (eval s l) (eval s r) 
 
       
 
@@ -77,7 +79,22 @@ module Expr =
    
     *)
     ostap (
-      parse: empty {failwith "Not implemented yet"}
+      parse:          !(let make_ops = List.map (fun op -> ostap($(op)), fun l r -> Binop (op, l, r)) in 
+                        Ostap.Util.expr
+                        (fun x -> x)
+                        [|
+                          `Lefta, make_ops ["!!"];
+                          `Lefta, make_ops ["&&"];
+                          `Nona,  make_ops ["=="; "!="; "<="; "<"; ">="; ">"];
+                          `Lefta, make_ops ["+"; "-"];
+                          `Lefta, make_ops ["*"; "/"; "%"];
+                        |]
+                        atomic_expr
+                      );
+      const:          x:DECIMAL { Const x };
+      var:            v:IDENT { Var v };
+      sub_expr:       -"(" parse -")";
+      atomic_expr:    const | var | sub_expr
     )
 
   end
@@ -108,7 +125,7 @@ module Stmt =
         | Read var           -> 
             let (x :: input') = input in
             (Expr.update var x state, input', output)
-        | Write expr         -> (state, input, Expr.eval state expr :: output)
+        | Write expr         -> (state, input, output @ [Expr.eval state expr])
         | Assign (var, expr) -> (
             Expr.update var (Expr.eval state expr) state,
             input,
@@ -119,7 +136,18 @@ module Stmt =
 
     (* Statement parser *)
     ostap (
-      parse: empty {failwith "Not implemented yet"}
+      parse:          !(Ostap.Util.expr
+                        (fun x -> x)
+                        [|
+                          `Righta, [ostap(";"), fun l r -> Seq (l, r)]
+                        |]
+                        atomic_stmt
+                      );
+      expr:        !(Expr.parse);
+      read:        -"read" -"(" x:IDENT -")" { Read x };
+      write:       -"write" -"(" x:expr -")" { Write x };
+      assign:      x:IDENT -":=" y:expr { Assign (x, y) };
+      atomic_stmt: read | write | assign
     )
       
   end
