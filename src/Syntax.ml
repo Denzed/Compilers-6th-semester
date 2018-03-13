@@ -95,7 +95,7 @@ module Stmt =
         | Read var           -> 
             let (x :: input') = input in
             (Expr.update var x state, input', output)
-        | Write expr         -> (state, input, Expr.eval state expr :: output)
+        | Write expr         -> (state, input, output @ [Expr.eval state expr])
         | Assign (var, expr) -> (
             Expr.update var (Expr.eval state expr) state,
             input,

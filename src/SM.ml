@@ -56,7 +56,7 @@ let eval c p =
                 (x :: stack, (state, input', output))
             | WRITE    -> 
                 let (x :: stack') = stack in 
-                (stack', (state, input, x :: output))
+                (stack', (state, input, output @ [x]))
             | LD var   -> (state var :: stack, (state, input, output))
             | ST var   -> 
                 let (x :: stack') = stack in 
