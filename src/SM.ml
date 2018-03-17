@@ -1,5 +1,6 @@
 open GT       
 open Language
+open List
        
 (* The type for the stack machine instructions *)
 @type insn =
@@ -24,7 +25,29 @@ type config = int list * Stmt.config
 
    Takes a configuration and a program, and returns a configuration as a result
 *)                         
-let rec eval conf prog = failwith "Not yet implemented"
+let eval c p = 
+    let eval_insn c ins = 
+        let (stack, config) = c in
+        let (state, input, output) = config in
+        match ins with
+            | BINOP op -> 
+                let (r :: l :: stack') = stack in 
+                (Language.Expr.get_binop_function op l r :: stack', config)
+            | CONST x  -> (x :: stack, config)
+            | READ     -> 
+                let (x :: input') = input in 
+                (x :: stack, (state, input', output))
+            | WRITE    -> 
+                let (x :: stack') = stack in 
+                (stack', (state, input, output @ [x]))
+            | LD var   -> (state var :: stack, (state, input, output))
+            | ST var   -> 
+                let (x :: stack') = stack in 
+                (
+                    stack', 
+                    (Language.Expr.update var x state, input, output)
+                ) in
+    fold_left eval_insn c p
 
 (* Top-level evaluation
 
@@ -41,14 +64,14 @@ let run p i = let (_, (_, _, o)) = eval ([], (Expr.empty, i, [])) p in o
    Takes a program in the source language and returns an equivalent program for the
    stack machine
 *)
-let rec compile =
-  let rec expr = function
-  | Expr.Var   x          -> [LD x]
-  | Expr.Const n          -> [CONST n]
-  | Expr.Binop (op, x, y) -> expr x @ expr y @ [BINOP op]
-  in
-  function
-  | Stmt.Seq (s1, s2)  -> compile s1 @ compile s2
-  | Stmt.Read x        -> [READ; ST x]
-  | Stmt.Write e       -> expr e @ [WRITE]
-  | Stmt.Assign (x, e) -> expr e @ [ST x]
+let rec compile st = 
+    let rec compile_expr expr = 
+        match expr with
+            | Language.Expr.Const c          -> [CONST c]
+            | Language.Expr.Var x            -> [LD x]
+            | Language.Expr.Binop (op, l, r) -> compile_expr l @ compile_expr r @ [BINOP op] in
+    match st with
+        | Language.Stmt.Read var           -> [READ; ST var]
+        | Language.Stmt.Write expr         -> compile_expr expr @ [WRITE]
+        | Language.Stmt.Assign (var, expr) -> compile_expr expr @ [ST var]
+        | Language.Stmt.Seq (st1, st2)     -> compile st1 @ compile st2

@@ -43,41 +43,57 @@ module Expr =
  
        Takes a state and an expression, and returns the value of the expression in 
        the given state.
-     *)                                                       
-    let to_func op =
-      let bti   = function true -> 1 | _ -> 0 in
-      let itb b = b <> 0 in
-      let (|>) f g   = fun x y -> f (g x y) in
-      match op with
-      | "+"  -> (+)
-      | "-"  -> (-)
-      | "*"  -> ( * )
-      | "/"  -> (/)
-      | "%"  -> (mod)
-      | "<"  -> bti |> (< )
-      | "<=" -> bti |> (<=)
-      | ">"  -> bti |> (> )
-      | ">=" -> bti |> (>=)
-      | "==" -> bti |> (= )
-      | "!=" -> bti |> (<>)
-      | "&&" -> fun x y -> bti (itb x && itb y)
-      | "!!" -> fun x y -> bti (itb x || itb y)
-      | _    -> failwith (Printf.sprintf "Unknown binary operator %s" op)    
-    
-    let rec eval st expr =      
-      match expr with
-      | Const n -> n
-      | Var   x -> st x
-      | Binop (op, x, y) -> to_func op (eval st x) (eval st y)
+    *)
+    let get_binop_function binop =
+      let bool_to_int b = if b then 1 else 0 in
+      let int_to_bool i = if i == 0 then false else true in
+      fun l r ->
+        match binop with
+            | "!!"  -> bool_to_int ((int_to_bool l) || (int_to_bool r))
+            | "&&"  -> bool_to_int ((int_to_bool l) && (int_to_bool r))
+            | "=="  -> bool_to_int (l == r)
+            | "!="  -> bool_to_int (l != r)
+            | "<"   -> bool_to_int (l < r)
+            | "<="  -> bool_to_int (l <= r)
+            | ">"   -> bool_to_int (l > r)
+            | ">="  -> bool_to_int (l >= r)
+            | "+"   -> l + r
+            | "-"   -> l - r
+            | "*"   -> l * r
+            | "/"   -> l / r
+            | "%"   -> l mod r
+            | _     -> failwith "Wrong binary operator"
 
+    let rec eval s e = 
+      match e with
+        | Const x          -> x
+        | Var v            -> s v
+        | Binop (op, l, r) -> get_binop_function op (eval s l) (eval s r) 
+
+      
     (* Expression parser. You can use the following terminals:
 
          IDENT   --- a non-empty identifier a-zA-Z[a-zA-Z0-9_]* as a string
          DECIMAL --- a decimal constant [0-9]+ as a string
                                                                                                                   
     *)
-    ostap (                                      
-      parse: empty {failwith "Not yet implemented"}
+    ostap (
+      parse:          !(let make_ops = List.map (fun op -> ostap($(op)), fun l r -> Binop (op, l, r)) in 
+                        Ostap.Util.expr
+                        (fun x -> x)
+                        [|
+                          `Lefta, make_ops ["!!"];
+                          `Lefta, make_ops ["&&"];
+                          `Nona,  make_ops ["=="; "!="; "<="; "<"; ">="; ">"];
+                          `Lefta, make_ops ["+"; "-"];
+                          `Lefta, make_ops ["*"; "/"; "%"];
+                        |]
+                        atomic_expr
+                      );
+      const:          x:DECIMAL { Const x };
+      var:            v:IDENT { Var v };
+      sub_expr:       -"(" parse -")";
+      atomic_expr:    const | var | sub_expr
     )
     
   end
@@ -102,16 +118,34 @@ module Stmt =
 
        Takes a configuration and a statement, and returns another configuration
     *)
-    let rec eval ((st, i, o) as conf) stmt =
-      match stmt with
-      | Read    x       -> (match i with z::i' -> (Expr.update x z st, i', o) | _ -> failwith "Unexpected end of input")
-      | Write   e       -> (st, i, o @ [Expr.eval st e])
-      | Assign (x, e)   -> (Expr.update x (Expr.eval st e) st, i, o)
-      | Seq    (s1, s2) -> eval (eval conf s1) s2
-                                
+    let rec eval c st = 
+      let (state, input, output) = c in
+      match st with
+        | Read var           -> 
+            let (x :: input') = input in
+            (Expr.update var x state, input', output)
+        | Write expr         -> (state, input, output @ [Expr.eval state expr])
+        | Assign (var, expr) -> (
+            Expr.update var (Expr.eval state expr) state,
+            input,
+            output
+          )
+        | Seq (st1, st2)     -> eval (eval c st1) st2    
+
     (* Statement parser *)
     ostap (
-      parse: empty {failwith "Not yet implemented"}
+      parse:          !(Ostap.Util.expr
+                        (fun x -> x)
+                        [|
+                          `Righta, [ostap(";"), fun l r -> Seq (l, r)]
+                        |]
+                        atomic_stmt
+                      );
+      expr:        !(Expr.parse);
+      read:        -"read" -"(" x:IDENT -")" { Read x };
+      write:       -"write" -"(" x:expr -")" { Write x };
+      assign:      x:IDENT -":=" y:expr { Assign (x, y) };
+      atomic_stmt: read | write | assign
     )
       
   end
