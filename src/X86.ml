@@ -1,3 +1,5 @@
+open List
+
 (* X86 codegeneration interface *)
 
 (* The registers: *)
@@ -80,7 +82,69 @@ open SM
    Take an environment, a stack machine program, and returns a pair --- the updated environment and the list
    of x86 instructions
 *)
-let compile env code = failwith "Not yet implemented"
+let compile env code = 
+    let mov f t = match (f, t) with
+      | (R _, _) -> [Mov (f, t)]
+      | (_, R _) -> [Mov (f, t)]
+      | _        -> [Mov (f, eax); Mov (eax, t)] 
+    in
+    let compile_insn c ins = 
+        let (env, instrs) = c in
+        match ins with
+        | CONST x  -> 
+          let (x_addr, env') = env#allocate in
+          (env', instrs @ mov (L x) x_addr)
+        | READ     -> 
+          let (stack_addr, env') = env#allocate in
+          (env', instrs @ [Call "Lread"] @ mov eax stack_addr)
+        | WRITE    -> 
+          let (stack_addr, env') = env#pop in
+          (env', instrs @ [Push stack_addr; Call "Lwrite"; Pop eax])
+        | LD var   -> 
+          let (stack_addr, env') = (env#global var)#allocate in
+          (env', instrs @ mov (M env#loc var) stack_addr)
+        | ST var   -> 
+          let (stack_addr, env') = (env#global var)#pop in
+          (env', instrs @ mov stack_addr (M env#loc var))
+        | BINOP op -> 
+          let to_bool x = [
+            Binop ("^", eax, eax);
+            Binop ("cmp", (L 0), x);
+            Set ("ne", "%al");
+            Mov (eax, x)
+            ] in
+          let do_binop op l r = mov r eax @ [Binop (op, l, eax)] @ mov eax r in
+          let cmp suf l r = mov r edx @ [
+            Binop ("^", eax, eax);
+            Binop ("cmp", l, edx);
+            Set (suf, "%al");
+            Mov (eax, r)
+            ] in
+          let (l, r, env') = env#pop2 in
+          let (stack_addr, env'') = env'#allocate in
+            (
+              env'',
+              instrs @ (
+                match op with
+                | "!!" -> to_bool l @ to_bool r @ do_binop "!!" l r
+                | "&&" -> to_bool l @ to_bool r @ do_binop "&&" l r
+                | "==" -> cmp "e"  l r
+                | "!=" -> cmp "ne" l r
+                | "<=" -> cmp "le" l r
+                | "<"  -> cmp "l"  l r
+                | ">=" -> cmp "ge" l r
+                | ">"  -> cmp "g"  l r
+                | "+"  -> do_binop "+" l r
+                | "-"  -> do_binop "-" l r
+                | "*"  -> do_binop "*" l r
+                | "/"  -> mov r eax @ [Cltd; IDiv l] @ mov eax r
+                | "%"  -> mov r eax @ [Cltd; IDiv l] @ mov edx r
+                | _ -> failwith "unexpected binary operator"
+              ) @ mov r stack_addr
+            )
+        in
+    fold_left compile_insn (env, []) code
+
 
 (* A set of strings *)           
 module S = Set.Make (String)
@@ -99,10 +163,10 @@ class env =
     method allocate =    
       let x, n =
 	let rec allocate' = function
-	| []                            -> ebx     , 0
-	| (S n)::_                      -> S (n+1) , n+1
-	| (R n)::_ when n < num_of_regs -> R (n+1) , stack_slots
-	| _                             -> S 0     , 1
+	| []                                -> ebx     , 0
+	| (S n)::_                          -> S (n+1) , n+2 (* n+2 because we already have S 0, S 1... S n -> (n + 1) *)
+	| (R n)::_ when n + 1 < num_of_regs -> R (n+1) , stack_slots
+	| _                                 -> S 0     , 1
 	in
 	allocate' stack
       in
