@@ -42,7 +42,10 @@ type instr =
 (* pops from the hardware stack to the operand          *) | Pop   of opnd
 (* call a function by a name                            *) | Call  of string
 (* returns from a function                              *) | Ret
-
+(* a label in the code                                  *) | Label of string
+(* a conditional jump                                   *) | CJmp  of string * string
+(* a non-conditional jump                               *) | Jmp   of string
+                                                               
 (* Instruction printer *)
 let show instr =
   let binop = function
@@ -71,6 +74,9 @@ let show instr =
   | Pop    s           -> Printf.sprintf "\tpopl\t%s"      (opnd s)
   | Ret                -> "\tret"
   | Call   p           -> Printf.sprintf "\tcall\t%s" p
+  | Label  l           -> Printf.sprintf "%s:\n" l
+  | Jmp    l           -> Printf.sprintf "\tjmp\t%s" l
+  | CJmp  (s , l)      -> Printf.sprintf "\tj%s\t%s" s l
 
 (* Opening stack machine to use instructions without fully qualified names *)
 open SM
@@ -176,7 +182,7 @@ class env =
     method push y = {< stack = y::stack >}
 
     (* pops one operand from the symbolic stack *)
-    method pop  = let x::stack'    = stack in x,    {< stack = stack' >}
+    method pop  = let x::stack' = stack in x, {< stack = stack' >}
 
     (* pops two operands from the symbolic stack *)
     method pop2 = let x::y::stack' = stack in x, y, {< stack = stack' >}
@@ -191,7 +197,7 @@ class env =
     method globals = S.elements globals
   end
 
-(* compiles a unit: generates x86 machine code for the stack program and surrounds it
+(* Compiles a unit: generates x86 machine code for the stack program and surrounds it
    with function prologue/epilogue
 *)
 let compile_unit env scode =  
