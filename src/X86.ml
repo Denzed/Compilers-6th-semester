@@ -148,6 +148,13 @@ let compile env code =
                 | _ -> failwith "unexpected binary operator"
               ) @ mov r stack_addr
             )
+        | LABEL l     -> 
+          (env, instrs @ [Label l])
+        | JMP l       -> 
+          (env, instrs @ [Jmp l])
+        | CJMP (c, l) -> 
+          let (stack_addr, env') = env#pop in
+          (env, instrs @ [Binop ("cmp", (L 0), stack_addr); CJmp (c, l)])
         in
     fold_left compile_insn (env, []) code
 

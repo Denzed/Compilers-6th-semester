@@ -44,9 +44,9 @@ module Expr =
        Takes a state and an expression, and returns the value of the expression in 
        the given state.
     *)
+    let bool_to_int b = if b then 1 else 0
+    let int_to_bool i = if i == 0 then false else true
     let get_binop_function binop =
-      let bool_to_int b = if b then 1 else 0 in
-      let int_to_bool i = if i == 0 then false else true in
       fun l r ->
         match binop with
             | "!!"  -> bool_to_int ((int_to_bool l) || (int_to_bool r))
@@ -103,14 +103,14 @@ module Stmt =
 
     (* The type for statements *)
     @type t =
-    (* read into the variable           *) | Read   of string
-    (* write the value of an expression *) | Write  of Expr.t
-    (* assignment                       *) | Assign of string * Expr.t
-    (* composition                      *) | Seq    of t * t 
+    (* read into the variable           *) | Read    of string
+    (* write the value of an expression *) | Write   of Expr.t
+    (* assignment                       *) | Assign  of string * Expr.t
+    (* composition                      *) | Seq     of t * t 
     (* empty statement                  *) | Skip
-    (* conditional                      *) | If     of Expr.t * t * t
-    (* loop with a pre-condition        *) | While  of Expr.t * t
-    (* loop with a post-condition       *) (* add yourself *)  with show
+    (* conditional                      *) | If      of Expr.t * t * t
+    (* loop with a pre-condition        *) | While   of Expr.t * t
+    (* loop with a post-condition       *) | Repeat of t * Expr.t  with show
                                                                     
     (* The type of configuration: a state, an input stream, an output stream *)
     type config = Expr.state * int list * int list 
@@ -124,31 +124,53 @@ module Stmt =
     let rec eval c st = 
       let (state, input, output) = c in
       match st with
-        | Read var           -> 
+        | Read var             -> 
             let (x :: input') = input in
             (Expr.update var x state, input', output)
-        | Write expr         -> (state, input, output @ [Expr.eval state expr])
-        | Assign (var, expr) -> (
+        | Write expr           -> (state, input, output @ [Expr.eval state expr])
+        | Assign (var, expr)   -> (
             Expr.update var (Expr.eval state expr) state,
             input,
             output
           )
-        | Seq (st1, st2)     -> eval (eval c st1) st2    
+        | Seq (st1, st2)       -> eval (eval c st1) st2
+        | Skip                 -> c
+        | If (cond, th, el)    -> eval c (
+            if Expr.int_to_bool (Expr.eval state cond) then th else el
+          ) 
+        | While (cond, body)   -> if Expr.int_to_bool (Expr.eval state cond)
+          then eval (eval c body) st 
+          else c
+        | Repeat (body, cond) -> 
+          let c' = eval c body in
+          let (state', _, _) = c' in
+          if Expr.int_to_bool (Expr.eval state' cond)
+            then c'
+            else eval c' st
 
     (* Statement parser *)
+    let st_or_skip st = match st with None -> Skip | Some st -> st
     ostap (
-      parse:          !(Ostap.Util.expr
-                        (fun x -> x)
-                        [|
-                          `Righta, [ostap(";"), fun l r -> Seq (l, r)]
-                        |]
-                        atomic_stmt
-                      );
-      expr:        !(Expr.parse);
-      read:        -"read" -"(" x:IDENT -")" { Read x };
-      write:       -"write" -"(" x:expr -")" { Write x };
-      assign:      x:IDENT -":=" y:expr { Assign (x, y) };
-      atomic_stmt: read | write | assign
+      parse:        st:!(Ostap.Util.expr
+                      (fun x -> x)
+                      [|
+                        `Righta, [ostap(";"), fun l r -> Seq (l, r)]
+                      |]
+                      atomic_stmt
+                    )? { st_or_skip st };
+      expr:         !(Expr.parse);
+      read:         -"read" -"(" x:IDENT -")" { Read x };
+      write:        -"write" -"(" x:expr -")" { Write x };
+      assign:       x:IDENT -":=" y:expr { Assign (x, y) };
+      if_then:      -"then" parse;
+      _if_else:     -"elif" cond:expr th:if_then el:if_else { If (cond, th, el) } | -"else" parse;
+      if_else:      el:_if_else? { st_or_skip el };
+      _if:          -"if" cond:expr th:if_then el:if_else -"fi" { If (cond, th, el) };
+      _while:       -"while" cond:expr -"do" body:parse -"od" { While (cond, body) };
+      do_while:     -"repeat" body:parse -"until" cond:expr { Repeat (body, cond) };
+      _for:         -"for" init:parse -"," cond:expr -"," step:parse -"do" body:parse -"od" { Seq (init, While (cond, Seq (body, step))) };
+      skip:         "skip" { Skip };
+      atomic_stmt: read | write | assign | skip | _if | _while | do_while | _for
     )
       
   end
