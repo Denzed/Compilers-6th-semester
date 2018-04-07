@@ -19,11 +19,11 @@ open List
                                                    
 (* The type for the stack machine program *)                                                               
 type prg = insn list
-
+                            
 (* The type for the stack machine configuration: control stack, stack and configuration from statement
    interpreter
  *)
-type config = (prg * State.t) list * int list * Stmt.config
+type config = (prg * State.t) list * int list * Expr.config
 
 (* Stack machine interpreter
 
@@ -94,6 +94,7 @@ let rec eval e c p =
    Takes a program, an input stream, and returns an output stream this program calculates
 *)
 let run p i =
+  (*print_prg p;*)
   let module M = Map.Make (String) in
   let rec make_map m = function
   | []              -> m
@@ -118,32 +119,39 @@ let compile (defs, st) =
         "label" ^ string_of_int id
     end in
     let rec compile_expr expr = 
-        match expr with
-            | Language.Expr.Const c          -> [CONST c]
-            | Language.Expr.Var x            -> [LD x]
-            | Language.Expr.Binop (op, l, r) -> compile_expr l @ compile_expr r @ [BINOP op] in
+      match expr with
+        | Language.Expr.Const c           -> [CONST c]
+        | Language.Expr.Var x             -> [LD x]
+        | Language.Expr.Binop (op, l, r)  -> compile_expr l @ compile_expr r @ [BINOP op]
+        | Language.Expr.Call (name, args) -> concat (map compile_expr args) @ [CALL name] in
     let rec compile_helper st =
       match st with
-          | Language.Stmt.Read var           -> [READ; ST var]
-          | Language.Stmt.Write expr         -> compile_expr expr @ [WRITE]
-          | Language.Stmt.Assign (var, expr) -> compile_expr expr @ [ST var]
-          | Language.Stmt.Seq (st1, st2)     -> compile_helper st1 @ compile_helper st2
-          | Language.Stmt.Skip               -> []
-          | Language.Stmt.If (cond, th, el)  -> 
-            let else_label = labels#get_new in
-            let end_label  = labels#get_new in
-            compile_expr cond @ 
-            [CJMP ("z", else_label)] @ compile_helper th @ 
-            [JMP end_label; LABEL else_label] @ compile_helper el @ [LABEL end_label]
-          | Language.Stmt.While (cond, body) ->
-            let begin_label = labels#get_new in
-            let end_label   = labels#get_new in
-            [LABEL begin_label] @ compile_expr cond @ [CJMP ("z", end_label)] @ 
-            compile_helper body @ [JMP begin_label; LABEL end_label]
-          | Language.Stmt.Repeat (body, cond) ->
-            let begin_label = labels#get_new in
-            [LABEL begin_label] @ compile_helper body @ compile_expr cond @ [CJMP ("z", begin_label)]
-          | Language.Stmt.Call (name, args) -> concat (map compile_expr args) @ [CALL name] in
+        | Language.Stmt.Read var           -> [READ; ST var]
+        | Language.Stmt.Write expr         -> compile_expr expr @ [WRITE]
+        | Language.Stmt.Assign (var, expr) -> compile_expr expr @ [ST var]
+        | Language.Stmt.Seq (st1, st2)     -> compile_helper st1 @ compile_helper st2
+        | Language.Stmt.Skip               -> []
+        | Language.Stmt.If (cond, th, el)  -> 
+          let else_label = labels#get_new in
+          let end_label  = labels#get_new in
+          compile_expr cond @ 
+          [CJMP ("z", else_label)] @ compile_helper th @ 
+          [JMP end_label; LABEL else_label] @ compile_helper el @ [LABEL end_label]
+        | Language.Stmt.While (cond, body) ->
+          let begin_label = labels#get_new in
+          let end_label   = labels#get_new in
+          [LABEL begin_label] @ compile_expr cond @ [CJMP ("z", end_label)] @ 
+          compile_helper body @ [JMP begin_label; LABEL end_label]
+        | Language.Stmt.Repeat (body, cond) ->
+          let begin_label = labels#get_new in
+          [LABEL begin_label] @ compile_helper body @ compile_expr cond @ [CJMP ("z", begin_label)]
+        | Language.Stmt.Call (name, args) -> concat (map compile_expr args) @ [CALL name]
+        | Language.Stmt.Return optional_val -> 
+          (
+            match optional_val with
+              | Some expr -> compile_expr expr @ [END]
+              | _         -> [END]
+          ) in
     let compile_def (name, (args, locals, body)) = 
       [LABEL name; BEGIN (args, locals)] @ compile_helper body @ [END] in
     compile_helper st @ [END] @ concat (map compile_def defs)
