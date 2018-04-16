@@ -210,10 +210,13 @@ module S = Set.Make (String)
 
 (* Environment implementation *)
 let make_assoc l = 
-  let rec rev_init n f = if n > 0 
-    then (f n :: rev_init (n - 1) f)
-    else [] in
-  let init n f = rev (rev_init n f) in
+  let init n ~f =
+  if n < 0 then raise (Invalid_argument "init");
+  let rec loop i accum =
+    if i = 0 then accum
+    else loop (i-1) (f (i-1) :: accum)
+  in
+  loop n [] in
   List.combine l (init (List.length l) (fun x -> x))
                      
 class env =
