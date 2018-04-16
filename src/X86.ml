@@ -168,20 +168,22 @@ let compile env code =
             Mov (ebp, esp); 
             Pop ebp; 
             Ret; 
-            Meta ("\t.set " ^ env#lsize ^ ", " ^ string_of_int env#allocated)
+            Meta ("\t.set " ^ env#lsize ^ ", " ^ string_of_int (env#allocated * word_size))
           ] in
           (env, instrs @ def_end)
         | CALL (func_name, arg_count, is_procedure) ->
           let push_registers = map (fun reg -> Push reg) env#live_registers in
+          let pop_registers = map (fun reg -> Pop reg) (rev env#live_registers) in 
           let rec repeat func times value = if times > 0
             then repeat func (times - 1) (func value)
             else value in
           let get_arg = fun (env, args) -> 
             let (arg, env') = env#pop in 
             (env', arg :: args) in
-          let (env', args) = repeat get_arg arg_count (env, []) in
+          let (env', rev_args) = repeat get_arg arg_count (env, []) in
+          let args = rev rev_args in
           let push_args = map (fun arg -> Push arg) args in
-          let pop_registers = map (fun reg -> Pop reg) env#live_registers in 
+          
           let (env'', get_returned) = if is_procedure 
             then (env', [])
             else 
@@ -189,7 +191,7 @@ let compile env code =
               (env'', [Mov (eax, stack_addr)]) in
           let func_call = push_registers @ 
               push_args @ 
-              [Call func_name; Binop ("-", L (arg_count * word_size), esp)] @ 
+              [Call func_name; Binop ("+", L (arg_count * word_size), esp)] @ 
               pop_registers @ 
               get_returned in
           (env'', instrs @ func_call)
@@ -279,7 +281,7 @@ let genasm (ds, stmt) =
   let env, code =
     compile
       (new env)
-      ((LABEL "main") :: (BEGIN ("main", [], [])) :: SM.compile (ds, stmt))
+      (SM.compile_defs ds @ ((LABEL "main") :: (BEGIN ("main", [], [])) :: SM.compile_st stmt @ [END]))
   in
   let data = Meta "\t.data" :: (List.map (fun s -> Meta (s ^ ":\t.int\t0")) env#globals) in 
   let asm = Buffer.create 1024 in

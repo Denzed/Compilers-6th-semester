@@ -104,20 +104,21 @@ let run p i =
   let m = make_map M.empty p in
   let (_, _, (_, _, o)) = eval (object method labeled l = M.find l m end) ([], [], (State.empty, i, [])) p in o
 
-(* Stack machine compiler
+(* Stack machine statement compiler
 
      val compile : Language.t -> prg
 
    Takes a program in the source language and returns an equivalent program for the
    stack machine
 *)
-let compile (defs, st) = 
-    let labels = object 
-      val mutable id = 0
-      method get_new = 
-        id <- (id + 1);
-        "label" ^ string_of_int id
-    end in
+let labels = object 
+  val mutable id = 0
+  method get_new = 
+    id <- (id + 1);
+    "label" ^ string_of_int id
+end 
+
+let compile_st st = 
     let rec compile_expr expr = 
       match expr with
         | Language.Expr.Const c           -> [CONST c]
@@ -152,7 +153,25 @@ let compile (defs, st) =
               | Some expr -> compile_expr expr @ [RET true]
               | _         -> [RET false]
           ) in
-    let compile_def (name, (args, locals, body)) = 
-      [LABEL name; BEGIN (name, args, locals)] @ compile_helper body @ [END] in
-    let after_defs = labels#get_new in
-    [JMP after_defs] @ concat (map compile_def defs) @ [LABEL after_defs] @ compile_helper st
+    compile_helper st
+
+(* Stack machine function definition compiler
+
+     val compile_defs : Definition.t list -> prg
+
+   Takes a list of Definition's and compiles them to stack machine language
+*)
+let compile_defs defs = 
+  let compile_def (name, (args, locals, body)) = 
+    [LABEL name; BEGIN (name, args, locals)] @ compile_st body @ [END] in
+  let after_defs = labels#get_new in
+  [JMP after_defs] @ concat (map compile_def defs) @ [LABEL after_defs]
+
+(* Stack machine compiler
+
+     val compile : Definition.t list * Language.t -> prg
+
+   Takes a program in the source language and returns an equivalent program for the
+   stack machine
+*)
+let compile (defs, st) = compile_defs defs @ compile_st st
