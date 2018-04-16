@@ -209,7 +209,12 @@ let compile env code =
 module S = Set.Make (String)
 
 (* Environment implementation *)
-let make_assoc l = List.combine l (List.init (List.length l) (fun x -> x))
+let make_assoc l = 
+  let rec rev_init n f = if n > 0 
+    then (f n :: rev_init (n - 1) f)
+    else [] in
+  let init n f = rev (rev_init n f) in
+  List.combine l (init (List.length l) (fun x -> x))
                      
 class env =
   object (self)
