@@ -2,8 +2,8 @@
 
 # include <stdio.h>
 
-/* Lread is an implementation of the "read" construct */
-extern int Lread () {
+/* read is an implementation of the "read" construct */
+extern int read () {
   int result;
 
   printf ("> "); 
@@ -13,8 +13,8 @@ extern int Lread () {
   return result;
 }
 
-/* Lwrite is an implementation of the "write" construct */
-extern int Lwrite (int n) {
+/* write is an implementation of the "write" construct */
+extern int write (int n) {
   printf ("%d\n", n);
   fflush (stdout);
 
