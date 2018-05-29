@@ -1,3 +1,5 @@
+open List
+
 (* X86 codegeneration interface *)
 
 (* The registers: *)
@@ -91,23 +93,127 @@ open SM
    of x86 instructions
 *)
 let compile env code =
-  let suffix = function
-  | "<"  -> "l"
-  | "<=" -> "le"
-  | "==" -> "e"
-  | "!=" -> "ne"
-  | ">=" -> "ge"
-  | ">"  -> "g"
-  | _    -> failwith "unknown operator"	
-  in
-  let rec compile' env scode = failwith "Not implemented" in
+  let rec compile' env scode = 
+    let mov f t = match (f, t) with
+      | (R _, _) -> [Mov (f, t)]
+      | (_, R _) -> [Mov (f, t)]
+      | _        -> [Mov (f, eax); Mov (eax, t)] 
+    in
+    let compile_insn c ins = 
+        let (env, instrs) = c in
+        match ins with
+        | CONST x  -> 
+          let (x_addr, env') = env#allocate in
+          (env', instrs @ mov (L x) x_addr)
+        | LD var   -> 
+          let (stack_addr, env') = (env#global var)#allocate in
+          (env', instrs @ mov (env#loc var) stack_addr)
+        | ST var   -> 
+          let (stack_addr, env') = (env#global var)#pop in
+          (env', instrs @ mov stack_addr (env#loc var))
+        | BINOP op -> 
+          let to_bool x = [
+            Binop ("^", eax, eax);
+            Binop ("cmp", (L 0), x);
+            Set ("ne", "%al");
+            Mov (eax, x)
+            ] in
+          let do_binop op l r = mov r eax @ [Binop (op, l, eax)] @ mov eax r in
+          let cmp suf l r = mov r edx @ [
+            Binop ("^", eax, eax);
+            Binop ("cmp", l, edx);
+            Set (suf, "%al");
+            Mov (eax, r)
+            ] in
+          let (l, r, env') = env#pop2 in
+          let (stack_addr, env'') = env'#allocate in
+            (
+              env'',
+              instrs @ (
+                match op with
+                | "!!" -> to_bool l @ to_bool r @ do_binop "!!" l r
+                | "&&" -> to_bool l @ to_bool r @ do_binop "&&" l r
+                | "==" -> cmp "e"  l r
+                | "!=" -> cmp "ne" l r
+                | "<=" -> cmp "le" l r
+                | "<"  -> cmp "l"  l r
+                | ">=" -> cmp "ge" l r
+                | ">"  -> cmp "g"  l r
+                | "+"  -> do_binop "+" l r
+                | "-"  -> do_binop "-" l r
+                | "*"  -> do_binop "*" l r
+                | "/"  -> mov r eax @ [Cltd; IDiv l] @ mov eax r
+                | "%"  -> mov r eax @ [Cltd; IDiv l] @ mov edx r
+                | _ -> failwith "unexpected binary operator"
+              ) @ mov r stack_addr
+            )
+        | LABEL l     -> 
+          (env, instrs @ [Label l])
+        | JMP l       -> 
+          (env, instrs @ [Jmp l])
+        | CJMP (c, l) -> 
+          let (stack_addr, env') = env#pop in
+          (env, instrs @ [Binop ("cmp", (L 0), stack_addr); CJmp (c, l)])
+        | BEGIN (func_name, arg_names, local_names) ->
+          let env = env#enter func_name arg_names local_names in
+          (env, instrs @ [Push ebp; Mov (esp, ebp); Binop ("-", M ("$" ^ env#lsize), esp)])
+        | END ->
+          let def_end = [
+            Label env#epilogue; 
+            Mov (ebp, esp); 
+            Pop ebp; 
+            Ret; 
+            Meta ("\t.set " ^ env#lsize ^ ", " ^ string_of_int (env#allocated * word_size))
+          ] in
+          (env, instrs @ def_end)
+        | CALL (func_name, arg_count, is_procedure) ->
+          let push_registers = map (fun reg -> Push reg) env#live_registers in
+          let pop_registers = map (fun reg -> Pop reg) (rev env#live_registers) in 
+          let rec repeat func times value = if times > 0
+            then repeat func (times - 1) (func value)
+            else value in
+          let get_arg = fun (env, args) -> 
+            let (arg, env') = env#pop in 
+            (env', arg :: args) in
+          let (env', rev_args) = repeat get_arg arg_count (env, []) in
+          let args = rev rev_args in
+          let push_args = map (fun arg -> Push arg) args in
+          
+          let (env'', get_returned) = if is_procedure 
+            then (env', [])
+            else 
+              let (stack_addr, env'') = env'#allocate in
+              (env'', [Mov (eax, stack_addr)]) in
+          let func_call = push_registers @ 
+              push_args @ 
+              [Call func_name; Binop ("+", L (arg_count * word_size), esp)] @ 
+              pop_registers @ 
+              get_returned in
+          (env'', instrs @ func_call)
+        | RET has_value -> if has_value
+          then 
+            let (stack_addr, env') = env#pop in
+            (env', instrs @ [Mov (stack_addr, eax); Jmp env#epilogue])
+          else
+            (env, instrs @ [Jmp env#epilogue])
+        | _             -> failwith "Not implemented"
+        in
+    fold_left compile_insn (env, []) code in
   compile' env code
 
 (* A set of strings *)           
 module S = Set.Make (String)
 
 (* Environment implementation *)
-let make_assoc l = List.combine l (List.init (List.length l) (fun x -> x))
+let make_assoc l = 
+  let init n ~f =
+  if n < 0 then raise (Invalid_argument "init");
+  let rec loop i accum =
+    if i = 0 then accum
+    else loop (i-1) (f (i-1) :: accum)
+  in
+  loop n [] in
+  List.combine l (init (List.length l) (fun x -> x))
                      
 class env =
   object (self)
@@ -128,11 +234,11 @@ class env =
     method allocate =    
       let x, n =
 	let rec allocate' = function
-	| []                            -> ebx     , 0
-	| (S n)::_                      -> S (n+1) , n+2
-	| (R n)::_ when n < num_of_regs -> R (n+1) , stack_slots
-        | (M _)::s                      -> allocate' s
-	| _                             -> S 0     , 1
+	| []                            -> ebx,           0
+	| (S n)::_                      -> S (n + 1),     n + 2
+	| (R n)::_ when n < num_of_regs -> R (n + 1),     stack_slots
+  | (M _)::s                      -> allocate'      s
+	| _                             -> S stack_slots, stack_slots + 1
 	in
 	allocate' stack
       in
@@ -180,7 +286,7 @@ let genasm (ds, stmt) =
   let env, code =
     compile
       (new env)
-      ((LABEL "main") :: (BEGIN ("main", [], [])) :: SM.compile (ds, stmt))
+      (SM.compile_defs ds @ ((LABEL "main") :: (BEGIN ("main", [], [])) :: SM.compile_st stmt @ [END]))
   in
   let data = Meta "\t.data" :: (List.map (fun s -> Meta (s ^ ":\t.int\t0")) env#globals) in 
   let asm = Buffer.create 1024 in
