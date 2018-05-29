@@ -92,8 +92,7 @@ open SM
    Take an environment, a stack machine program, and returns a pair --- the updated environment and the list
    of x86 instructions
 *)
-let compile env code =
-  let rec compile' env scode = 
+let compile env code = 
     let mov f t = match (f, t) with
       | (R _, _) -> [Mov (f, t)]
       | (_, R _) -> [Mov (f, t)]
@@ -196,10 +195,9 @@ let compile env code =
             (env', instrs @ [Mov (stack_addr, eax); Jmp env#epilogue])
           else
             (env, instrs @ [Jmp env#epilogue])
-        | _             -> failwith "Not implemented"
         in
-    fold_left compile_insn (env, []) code in
-  compile' env code
+    fold_left compile_insn (env, []) code
+
 
 (* A set of strings *)           
 module S = Set.Make (String)
@@ -234,11 +232,10 @@ class env =
     method allocate =    
       let x, n =
 	let rec allocate' = function
-	| []                            -> ebx,           0
-	| (S n)::_                      -> S (n + 1),     n + 2
-	| (R n)::_ when n < num_of_regs -> R (n + 1),     stack_slots
-  | (M _)::s                      -> allocate'      s
-	| _                             -> S stack_slots, stack_slots + 1
+	| []                                -> ebx     , 0
+	| (S n)::_                          -> S (n+1) , n+2
+	| (R n)::_ when n + 1 < num_of_regs -> R (n+1) , stack_slots
+	| _                                 -> S 0     , 1
 	in
 	allocate' stack
       in
@@ -275,7 +272,7 @@ class env =
     (* returns a list of live registers *)
     method live_registers =
       List.filter (function R _ -> true | _ -> false) stack
-       
+      
   end
   
 (* Generates an assembler text for a program: first compiles the program into
