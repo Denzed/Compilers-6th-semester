@@ -303,8 +303,8 @@ extern void* Lfread (char *fname) {
 // New one
 */
 
-/* read is an implementation of the "read" construct */
-extern int read () {
+/* Lread is an implementation of the "read" construct */
+extern int Lread () {
   int result;
 
   printf ("> "); 
@@ -314,8 +314,8 @@ extern int read () {
   return result;
 }
 
-/* write is an implementation of the "write" construct */
-extern int write (int n) {
+/* Lwrite is an implementation of the "write" construct */
+extern int Lwrite (int n) {
   printf ("%d\n", n);
   fflush (stdout);
 
