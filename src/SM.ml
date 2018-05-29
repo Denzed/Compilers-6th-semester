@@ -63,8 +63,8 @@ let rec eval e c p =
           (State.update var x state, input, output)
         ) 
       | STA (var, cnt) ->
-        let (indexers, (v :: stack')) = split cnt stack in
-        (cstack, stack', (Stmt.update state var v indexers, input, output))
+        let (elems, (v :: stack')) = split cnt stack in
+        (cstack, stack', (Stmt.update state var v elems, input, output))
       | _              -> failwith "Not implemented"
       in
   let eval_labeled ins c p =
@@ -94,7 +94,7 @@ let rec eval e c p =
       | CALL (func, n_args, returns)              -> 
         if e#is_label func 
           then eval e ((p, state) :: cstack, stack, c) (e#labeled func)
-          else e#builtin conf func n_args returns
+          else eval e (e#builtin conf func n_args returns) p
       | _                 -> failwith "Not implemented"
       in
   match p with
@@ -129,7 +129,7 @@ let run p i =
            let f = match f.[0] with 'L' -> String.sub f 1 (String.length f - 1) | _ -> f in
            let args, stack' = split n stack in
            let (st, i, o, r) = Language.Builtin.eval (st, i, o, None) (List.rev args) f in
-           let stack'' = if p then stack' else let Some r = r in r::stack' in
+           let stack'' = if not p then stack' else let Some r = r in r::stack' in
            Printf.printf "Builtin: %s\n";
            (cstack, stack'', (st, i, o))
        end
@@ -159,7 +159,7 @@ let compile_st st =
         | Expr.Const c           -> [CONST c]
         | Expr.String s          -> [STRING s]
         | Expr.Array a           -> 
-          (flatten @@ map compile_expr a) @ [CALL ("$array", length a, true)]
+          (concat @@ map compile_expr a) @ [CALL ("$array", length a, true)]
         | Expr.Elem (e, idxs)    -> 
           compile_expr e @ compile_expr idxs @ [CALL ("$elem", 2, true)]
         | Expr.Length e                   -> 
@@ -168,7 +168,7 @@ let compile_st st =
         | Expr.Binop (op, l, r)  -> 
           compile_expr l @ compile_expr r @ [BINOP op]
         | Expr.Call (name, args) -> 
-          concat (map compile_expr args) @ [CALL (name, length args, false)] 
+          (concat @@ map compile_expr args) @ [CALL (name, length args, true)] 
         | _                      -> failwith "Not implemented"
         in
     let rec compile_helper st =
@@ -178,7 +178,7 @@ let compile_st st =
             match idxs with
             | [] -> compile_expr expr @ [ST var]
             | _  -> compile_expr expr 
-              @ (rev @@ flatten @@ map compile_expr idxs) 
+              @ (rev @@ concat @@ map compile_expr idxs) 
               @ [STA (var, length idxs)]
           )
         | Stmt.Seq (st1, st2)           -> 
@@ -199,7 +199,7 @@ let compile_st st =
           let begin_label = labels#get_new in
           [LABEL begin_label] @ compile_helper body @ compile_expr cond @ [CJMP ("z", begin_label)]
         | Stmt.Call (name, args)        -> 
-          concat (map compile_expr args) @ [CALL (name, length args, true)]
+          concat (map compile_expr args) @ [CALL (name, length args, false)]
         | Stmt.Return optional_val      -> 
           (
             match optional_val with

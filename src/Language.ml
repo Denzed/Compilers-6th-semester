@@ -208,19 +208,21 @@ module Expr =
                           `Lefta, make_ops ["+"; "-"];
                           `Lefta, make_ops ["*"; "/"; "%"];
                         |]
-                        atomic_expr
+                        expr
                       );
       const:          x:DECIMAL { Const x };
       var:            v:IDENT { Var v };
       str:            s:STRING { String (String.sub s 1 (String.length s - 2)) };
       chr:            c:CHAR { Const (Char.code c) };
       arr:            "[" l:!(Ostap.Util.list0)[parse] "]" { Array l };
-      arr_index:      e:atomic_expr indexers:(-"[" i:parse -"]" {`e i} | "." %"length" {`l})* { 
-                        List.fold_left (fun b -> function `e i -> Elem(b, i) | `l -> Length b) e indexers
+      indexed_expr:   e:atomic_expr indexers:(-"[" i:parse -"]" { i })+ { 
+                        List.fold_left (fun b i -> Elem (b, i)) e indexers
                       };
+      length_expr:    e:(indexed_expr | atomic_expr) -"." %"length" { Length e };
       call:           func:IDENT -"(" args:!(Ostap.Util.list0)[parse] -")" { Call (func, args) };
       sub_expr:       -"(" parse -")";
-      atomic_expr:    call | const | var | str | chr | arr | sub_expr
+      atomic_expr:    call | const | var | str | chr | arr | sub_expr;
+      expr:           length_expr | indexed_expr | atomic_expr
     )
     
   end
