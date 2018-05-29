@@ -83,7 +83,7 @@ let rec eval e c p =
         let set_arg arg ((x :: stack), state) = (stack, State.update arg x state) in
         let (stack', state') = fold_right set_arg arg_names (stack, State.enter state (arg_names @ local_names)) in
         eval e (cstack, stack', (state', input, output)) p
-      | END | RET _        -> 
+      | END | RET _                               -> 
         (
           match cstack with
             | []                 -> conf (* END of main *)
@@ -91,8 +91,10 @@ let rec eval e c p =
               let (p', state') = frame in
               eval e (cstack', stack, (State.leave state state', input, output)) p'
         )
-      | CALL (func, _, _) -> 
-        eval e ((p, state) :: cstack, stack, c) (e#labeled func) 
+      | CALL (func, n_args, returns)              -> 
+        if e#is_label func 
+          then eval e ((p, state) :: cstack, stack, c) (e#labeled func)
+          else e#builtin conf func n_args returns
       | _                 -> failwith "Not implemented"
       in
   match p with
@@ -127,7 +129,7 @@ let run p i =
            let f = match f.[0] with 'L' -> String.sub f 1 (String.length f - 1) | _ -> f in
            let args, stack' = split n stack in
            let (st, i, o, r) = Language.Builtin.eval (st, i, o, None) (List.rev args) f in
-           let stack'' = if not p then stack' else let Some r = r in r::stack' in
+           let stack'' = if p then stack' else let Some r = r in r::stack' in
            Printf.printf "Builtin: %s\n";
            (cstack, stack'', (st, i, o))
        end
