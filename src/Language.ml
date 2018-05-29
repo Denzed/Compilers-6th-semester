@@ -219,7 +219,9 @@ module Expr =
       indexed_expr:   e:atomic_expr indexers:single_index* { 
                         List.fold_left (fun b i -> Elem (b, i)) e indexers
                       };
-      length_expr:    indexed_expr | e:indexed_expr "." %"length" { Length e };
+      length_expr:    e:indexed_expr len:("." %"length")? { 
+                        match len with None -> e | _ -> Length e 
+                      };
       call:           func:IDENT -"(" args:!(Ostap.Util.list0)[parse] -")" { Call (func, args) };
       sub_expr:       -"(" parse -")";
       atomic_expr:    call | const | var | str | chr | arr | sub_expr
