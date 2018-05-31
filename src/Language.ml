@@ -30,6 +30,10 @@ module Value =
     let of_string s = String s
     let of_array  a = Array  a
 
+    let tag_of = function
+    | Sexp (t, _) -> t
+    | _ -> failwith "symbolic expression expected"
+
     let update_string s i x = String.init (String.length s) (fun j -> if j = i then x else s.[j])
     let update_array  a i x = 
       let init n ~f =
@@ -40,7 +44,6 @@ module Value =
       in
       loop n [] in
       init (List.length a) (fun j -> if j = i then x else List.nth a j)
-
   end
        
 (* States *)
@@ -159,7 +162,8 @@ module Expr =
                                                             
     (* Expression evaluator
 
-          val eval : env -> config -> t -> config
+           val eval : env -> config -> t -> int * config
+
 
        Takes an environment, a configuration and an expresion, and returns another configuration. The 
        environment supplies the following method
