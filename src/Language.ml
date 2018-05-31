@@ -346,7 +346,7 @@ module Stmt =
           (
             match value with
             | Value.Sexp (v_tag, sub_exprs) 
-              when v_tag = p_tag && List.compare_lengths sub_pats sub_exprs = 0 -> 
+              when v_tag = p_tag && List.length sub_pats = List.length sub_exprs -> 
               let match_single maybe_frame (p, e) = (
                 match maybe_frame with
                 | Some f -> match_pat f e p
