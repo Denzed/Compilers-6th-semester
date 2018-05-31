@@ -124,6 +124,7 @@ module Builtin =
     | ".array"   -> (st, i, o, Some (Value.of_array args))
     | "isArray"  -> let [a] = args in (st, i, o, Some (Value.of_int @@ match a with Value.Array  _ -> 1 | _ -> 0))
     | "isString" -> let [a] = args in (st, i, o, Some (Value.of_int @@ match a with Value.String _ -> 1 | _ -> 0))                     
+    | name       -> failwith ("no such builtin \"" ^ name ^ "\"")
        
   end
     
@@ -312,13 +313,6 @@ module Stmt =
     (* call a procedure                 *) | Call   of string * Expr.t list 
     (* leave a scope                    *) | Leave  with show
                                                                                    
-    (* Statement evaluator
-
-         val eval : env -> config -> t -> config
-
-       Takes an environment, a configuration and a statement, and returns another configuration. The 
-       environment is the same as for expressions
-    *)
     let update st x v is =
       let rec update a v = function
       | []    -> v           
@@ -330,7 +324,14 @@ module Stmt =
           ) 
       in
       State.update x (match is with [] -> v | _ -> update (State.eval st x) v is) st
+    
+    (* Statement evaluator
 
+         val eval : env -> config -> t -> config
+
+       Takes an environment, a configuration and a statement, and returns another configuration. The 
+       environment is the same as for expressions
+    *)
     let rec eval env ((state, input, output, retval) as c) k st = 
       let diamond st k = 
         match k with
