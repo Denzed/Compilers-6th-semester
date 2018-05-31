@@ -292,7 +292,7 @@ class env =
   | []                            -> ebx     , 0
   | (S n)::_                      -> S (n+1) , n+2
   | (R n)::_ when n < num_of_regs -> R (n+1) , stack_slots
-        | (M _)::s                      -> allocate' s
+  | (M _)::s                      -> allocate' s
   | _                             -> S 0     , 1
   in
   allocate' stack
