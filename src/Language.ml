@@ -303,7 +303,7 @@ module Stmt =
           identifier: ident:IDENT { Ident ident }
         )
         
-        let vars p =
+        let vars p = 
           transform(t) (object inherit [string list] @t[foldl] method c_Ident s _ name = name::s end) [] p
         
       end

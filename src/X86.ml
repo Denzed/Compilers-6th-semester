@@ -1,3 +1,5 @@
+open GT
+       
 (* X86 codegeneration interface *)
 
 (* The registers: *)
@@ -7,14 +9,15 @@ let regs = [|"%ebx"; "%ecx"; "%esi"; "%edi"; "%eax"; "%edx"; "%ebp"; "%esp"|]
 let num_of_regs = Array.length regs - 5
 
 (* We need to know the word size to calculate offsets correctly *)
-let word_size = 4
+let word_size = 4;;
 
 (* We need to distinguish the following operand types: *)
-type opnd = 
+@type opnd = 
 | R of int     (* hard register                    *)
 | S of int     (* a position on the hardware stack *)
 | M of string  (* a named memory location          *)
 | L of int     (* an immediate operand             *)
+with show
 
 (* For convenience we define the following synonyms for the registers: *)         
 let ebx = R 0
@@ -260,42 +263,76 @@ let compile env code =
         compile' env code
 
 (* A set of strings *)           
-module S = Set.Make (String)
+module S = Set.Make (String) 
 
 (* A map indexed by strings *)
-module M = Map.Make (String)
+module M = Map.Make (String) 
 
 (* Environment implementation *)
 let make_assoc l = List.combine l (Language.ListUtils.init (List.length l) (fun x -> x))
                      
 class env =
+  let chars          = "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNJPQRSTUVWXYZ" in
+  let make_assoc l i = List.combine l (List.init (List.length l) (fun x -> x + i)) in
+  let rec assoc  x   = function [] -> raise Not_found | l :: ls -> try List.assoc x l with Not_found -> assoc x ls in
   object (self)
     val globals     = S.empty (* a set of global variables         *)
     val stringm     = M.empty (* a string map                      *)
     val scount      = 0       (* string count                      *)
     val stack_slots = 0       (* maximal number of stack positions *)
+    val static_size = 0       (* static data size                  *)
     val stack       = []      (* symbolic stack                    *)
     val args        = []      (* function arguments                *)
     val locals      = []      (* function local variables          *)
     val fname       = ""      (* function name                     *)
+    val stackmap    = M.empty (* labels to stack map               *)
+    val barrier     = false   (* barrier condition                 *)
                         
+    method show_stack =
+      GT.show(list) (GT.show(opnd)) stack
+             
+    method print_locals =
+      Printf.printf "LOCALS: size = %d\n" static_size;
+      List.iter
+        (fun l ->
+          Printf.printf "(";
+          List.iter (fun (a, i) -> Printf.printf "%s=%d " a i) l;
+          Printf.printf ")\n"
+        ) locals;
+      Printf.printf "END LOCALS\n"
+
+    (* check barrier condition *)
+    method is_barrier = barrier
+
+    (* set barrier *)
+    method set_barrier = {< barrier = true >}
+
+    (* drop barrier *)
+    method drop_barrier = {< barrier = false >}
+                            
+    (* associates a stack to a label *)
+    method set_stack l = {< stackmap = M.add l stack stackmap >}
+                               
+    (* retrieves a stack for a label *)
+    method retrieve_stack l =
+      try {< stack = M.find l stackmap >} with Not_found -> self
+                               
     (* gets a name for a global variable *)
     method loc x =
       try S (- (List.assoc x args)  -  1)
       with Not_found ->  
-        try S (List.assoc x locals) with Not_found -> M ("global_" ^ x)
+        try S (assoc x locals) with Not_found -> M ("global_" ^ x)
         
     (* allocates a fresh position on a symbolic stack *)
     method allocate =    
       let x, n =
-  let rec allocate' = function
-  | []                            -> ebx     , 0
-  | (S n)::_                      -> S (n+1) , n+2
-  | (R n)::_ when n < num_of_regs -> R (n+1) , stack_slots
-        | (M _)::s                      -> allocate' s
-  | _                             -> S 0     , 1
-  in
-  allocate' stack
+	let rec allocate' = function
+	| []                            -> ebx          , 0
+	| (S n)::_                      -> S (n+1)      , n+2
+	| (R n)::_ when n < num_of_regs -> R (n+1)      , stack_slots
+	| _                             -> S static_size, static_size+1
+	in
+	allocate' stack
       in
       x, {< stack_slots = max n stack_slots; stack = x::stack >}
 
@@ -308,6 +345,20 @@ class env =
     (* pops two operands from the symbolic stack *)
     method pop2 = let x::y::stack' = stack in x, y, {< stack = stack' >}
 
+    (* peeks the top of the stack (the stack does not change) *)
+    method peek = List.hd stack
+
+    (* peeks two topmost values from the stack (the stack itself does not change) *)
+    method peek2 = let x::y::_ = stack in x, y
+
+    (* tag hash: gets a hash for a string tag *)
+    method hash tag =
+      let h = ref 0 in
+      for i = 0 to min (String.length tag - 1) 4 do
+        h := (!h lsl 6) lor (String.index chars tag.[i])
+      done;
+      !h      
+             
     (* registers a global variable in the environment *)
     method global x  = {< globals = S.add ("global_" ^ x) globals >}
 
@@ -330,8 +381,20 @@ class env =
                                 
     (* enters a function *)
     method enter f a l =
-      {< stack_slots = List.length l; stack = []; locals = make_assoc l; args = make_assoc a; fname = f >}
+      let n = List.length l in
+      {< static_size = n; stack_slots = n; stack = []; locals = [make_assoc l 0]; args = make_assoc a 0; fname = f >}
 
+    (* enters a scope *)
+    method scope vars =
+      let n = List.length vars in
+      let static_size' = n + static_size in
+      {< stack_slots = max stack_slots static_size'; static_size = static_size'; locals = (make_assoc vars static_size) :: locals >}
+
+    (* leaves a scope *)
+    method unscope =
+      let n = List.length (List.hd locals) in
+      {< static_size = static_size - n; locals = List.tl locals >}
+        
     (* returns a label for the epilogue *)
     method epilogue = Printf.sprintf "L%s_epilogue" fname
                                      
