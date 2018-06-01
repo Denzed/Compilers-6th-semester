@@ -7,6 +7,17 @@ open GT
 open Ostap
 open Combinators
 
+module ListUtils =
+  struct
+    let init n ~f =
+      if n < 0 then raise (Invalid_argument "init");
+      let rec loop i accum =
+        if i = 0 then accum
+        else loop (i-1) (f (i-1) :: accum)
+      in
+      loop n []
+  end
+
 (* Values *)
 module Value =
   struct
@@ -36,14 +47,7 @@ module Value =
 
     let update_string s i x = String.init (String.length s) (fun j -> if j = i then x else s.[j])
     let update_array  a i x = 
-      let init n ~f =
-      if n < 0 then raise (Invalid_argument "init");
-      let rec loop i accum =
-        if i = 0 then accum
-        else loop (i-1) (f (i-1) :: accum)
-      in
-      loop n [] in
-      init (List.length a) (fun j -> if j = i then x else List.nth a j)
+      ListUtils.init (List.length a) (fun j -> if j = i then x else List.nth a j)
   end
        
 (* States *)
