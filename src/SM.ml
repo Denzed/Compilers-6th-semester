@@ -123,7 +123,14 @@ let rec eval e c p =
       in 
       (cstack, Value.of_int has_matched :: stack', c)
     | ENTER new_vars -> 
-      (cstack, stack, (State.push state State.undefined new_vars, input, output))
+      let (new_vals, stack') = split (length new_vars) stack in
+      let add_val state var v = State.bind var v state in
+      let state' = List.fold_left2 add_val State.undefined new_vars new_vals in
+      (
+        cstack, 
+        stack', 
+        (Language.State.push state state' new_vars, input, output)
+      )
     | LEAVE          -> 
       (cstack, stack, (State.drop state, input, output))
     | _              -> failwith "Not a scope control instruction"
@@ -183,6 +190,10 @@ let run p i =
 *)
 let compile (defs, p) = 
   let label s = if s.[0] = '.' then s else "L" ^ s in
+  let not_sexp = function
+    | Stmt.Pattern.Sexp _ -> false
+    | _                   -> true 
+  in
   let env =
     object
       val mutable ls = 0
@@ -192,19 +203,43 @@ let compile (defs, p) =
   let rec call f args p =
     let args_code = List.concat @@ List.map expr args in
     args_code @ [CALL (label f, List.length args, p)]
-  and pattern lfalse = function
-  | Stmt.Pattern.Wildcard               -> []
-  | Stmt.Pattern.Ident var              -> [ST var]
-  | Stmt.Pattern.Sexp (p_tag, sub_pats) -> 
-    [DUP; TAG p_tag; CJMP ("z", lfalse)] @ bindings sub_pats lfalse
-  and bindings p lfalse = 
-    let rec bind_subs index = function
-    | []                 -> [DROP]
-    | (sub :: sub_pats') -> 
-      [DUP; CONST index; CALL (".elem", 2, false)] 
-        @ pattern lfalse sub @ bind_subs (index + 1) sub_pats'
-    in 
-      bind_subs 0 p
+  and pattern pat ltrue lfalse = 
+    (
+      match pat with 
+      | Stmt.Pattern.Wildcard             -> [DROP]
+      | Stmt.Pattern.Ident _              -> [DROP]
+      | Stmt.Pattern.Sexp (tag, sub_pats) ->
+        let local_lfalse = env#new_label in
+        let cnt = length sub_pats in
+        let add_sub index pat = 
+          [DUP] @ [CONST index] @ [CALL(".elem", 2, false)] 
+            @ pattern pat ltrue local_lfalse
+        in
+        [DUP] @ [TAG tag] @ [CJMP ("z", lfalse)] 
+          @ [DUP] @ [CALL(".length", 1, false)] @ [CONST(length sub_pats)] 
+          @ [BINOP ("==")] @ [CJMP ("z", lfalse)] 
+          @ (concat @@ mapi add_sub sub_pats) @ [DROP] @ [JMP ltrue] 
+          @ (
+            if for_all not_sexp sub_pats 
+              then []
+              else [LABEL local_lfalse] @ [DROP] @ [JMP lfalse]
+          )
+    )
+  and load_nth_var pat n = 
+    (
+      match pat with
+      | Stmt.Pattern.Wildcard           -> []
+      | Stmt.Pattern.Ident _            -> []
+      | Stmt.Pattern.Sexp (_, sub_pats) ->
+        let rec skip_vars skipped pat_index (sub_pat :: sub_pats') = 
+          let skipped' = skipped + Stmt.Pattern.cnt_vars sub_pat in
+          if skipped' >= n 
+            then [CONST pat_index] @ [CALL(".elem", 2, false)] 
+              @ (load_nth_var sub_pat (n - skipped)) 
+            else skip_vars skipped' (pat_index + 1) sub_pats'
+        in
+        skip_vars 0 0 sub_pats
+    )
   and expr = 
   (
     function
@@ -219,84 +254,60 @@ let compile (defs, p) =
     | Expr.Sexp (tag, exprs) -> 
       (concat @@ map expr exprs) @ [SEXP (tag, length exprs)]
   ) in
-  let rec compile_stmt l st = 
+  let rec compile_stmt st = 
   (
     match st with
     | Stmt.Assign (var, idxs, e) -> 
       (
-        false, 
-        (
-          match idxs with
-          | [] -> expr e @ [ST var]
-          | _  -> (concat @@ map expr idxs) @ expr e @ [STA (var, length idxs)]
-        )
+        match idxs with
+        | [] -> expr e @ [ST var]
+        | _  -> (concat @@ map expr idxs) @ expr e @ [STA (var, length idxs)]
       )
-    | Stmt.Seq (st1, st2)           -> 
-      let (rets1, c_st1) = compile_stmt l st1 in
-      let (rets2, c_st2) = compile_stmt l st2 in 
-      (rets1 || rets2, c_st1 @ c_st2)
-    | Stmt.Skip                     -> (false, [])
-    | Stmt.If (cond, th, el)        -> 
+    | Stmt.Seq (st1, st2)        -> compile_stmt st1 @ compile_stmt st2
+    | Stmt.Skip                  -> []
+    | Stmt.If (cond, th, el)     -> 
       let else_label = env#new_label in
       let end_label  = env#new_label in
-      let (rets_th, c_th) = compile_stmt l th in 
-      let (rets_el, c_el) = compile_stmt l el in
-      if (rets_th = rets_el || el = Skip)
-        then 
-        (
-          rets_th, 
-          expr cond @ [CJMP ("z", else_label)] 
-            @ c_th @ [JMP end_label; LABEL else_label]
-            @ c_el @ [LABEL end_label]
-        )
-        else failwith "only one of the branches returns"
-    | Stmt.While (cond, body)       ->
+      expr cond @ [CJMP ("z", else_label)] 
+        @ compile_stmt th @ [JMP end_label; LABEL else_label]
+        @ compile_stmt el @ [LABEL end_label]
+    | Stmt.While (cond, body)    ->
       let begin_label = env#new_label in
       let end_label   = env#new_label in
-      let (rets, c_body) = compile_stmt l body in
-      (
-        rets, 
-        [LABEL begin_label] @ expr cond @ [CJMP ("z", end_label)] 
-          @ c_body @ [JMP begin_label; LABEL end_label]
-      )
-    | Stmt.Repeat (body, cond)      ->
+      [LABEL begin_label] @ expr cond @ [CJMP ("z", end_label)] 
+        @ compile_stmt body @ [JMP begin_label; LABEL end_label]
+    | Stmt.Repeat (body, cond)   ->
       let begin_label = env#new_label in
-      let (rets, c_body) = compile_stmt l body in
-      (
-        rets, 
-        [LABEL begin_label] @ c_body @ expr cond @ [CJMP ("z", begin_label)]
-      )
-    | Stmt.Call (name, args)        -> (false, call name args true)
-    | Stmt.Return optional_val      -> 
+      [LABEL begin_label] @ compile_stmt body 
+        @ expr cond @ [CJMP ("z", begin_label)]
+    | Stmt.Call (name, args)     -> call name args true
+    | Stmt.Return optional_val   -> 
       (
         match optional_val with
-          | Some e -> (true, expr e @ [RET true])
-          | _      -> (false, [RET false])
+          | Some e -> expr e @ [RET true]
+          | _      -> [RET false]
       )
-    | Stmt.Leave                 -> (false, [LEAVE])
-    | Stmt.Case (e, cases)       ->
-      let success_label = env#new_label in
-      let fail_label = env#new_label in
-      let rec add_case (rets, code) (pat, body) =
-        let unmatched_label = env#new_label in
-        let (rets_case, c_body) = compile_stmt success_label body in
-        (
-          rets || rets_case, 
-          code @ [ENTER (Stmt.Pattern.vars pat)] @ pattern unmatched_label pat
-          @ c_body @ [JMP success_label; LABEL unmatched_label; LEAVE]
-        ) 
+    | Stmt.Leave                 -> [LEAVE]
+    | Stmt.Case (matched, cases) ->
+      let lend = env#new_label in
+      let compile_case (pat, body) =
+        let vars = Stmt.Pattern.vars pat in 
+        let var_cnt = length vars in
+        let ltrue = env#new_label in 
+        let lunmatched = env#new_label in
+        let helper i = [DUP] @ load_nth_var pat (i + 1) @ [SWAP] in
+        [DUP] @ pattern pat ltrue lunmatched 
+          @ (if not_sexp pat then [] else [LABEL ltrue])
+          @ (concat @@ ListUtils.init var_cnt helper) 
+          @ [DROP] @ [ENTER vars] @ compile_stmt body @ [LEAVE] @ [JMP lend] 
+          @ if not_sexp pat then [] else [LABEL lunmatched] @ [DROP]
       in
-      let (rets, c_cases) = fold_left add_case (false, []) cases in
-      (
-        rets, 
-        expr e @ c_cases 
-          @ [LABEL success_label; LEAVE; JMP l; LABEL fail_label; LEAVE]
-      )
+      expr matched @ (concat @@ map compile_case cases) @ [LABEL lend]
   ) in
   let compile_def (name, (args, locals, stmt)) =
     let lend       = env#new_label in
     let name_label = label name in
-    let rets, code = compile_stmt lend stmt in
+    let code = compile_stmt stmt in
     [LABEL name_label; BEGIN (name_label, args, locals)] @
     code @
     [LABEL lend; END]
@@ -308,5 +319,5 @@ let compile (defs, p) =
       defs
   in
   let lend = env#new_label in
-  let rets, code = compile_stmt lend p in
+  let code = compile_stmt p in
   code @ [LABEL lend; END] @ (List.concat def_code) 

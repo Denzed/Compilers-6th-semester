@@ -1,7 +1,9 @@
 /* Runtime library */
 
+// #define DEBUG 
+
 # include <stdio.h>
-# include <stdio.h>
+# include <stdlib.h>
 # include <malloc.h>
 # include <string.h>
 # include <stdarg.h>
@@ -77,6 +79,9 @@ extern void* Barray (int n, ...) {
 
 /* S-expression constructor; takes the number of parameters; the parameters are subexpressions and the tag */
 extern void* Bsexp (int n, ...) {
+#ifdef DEBUG
+  fprintf(stderr, "SEXP(%d)\n", n);
+#endif
   va_list args;
   int i;
   sexp *r = (sexp*) malloc (sizeof(int) * (n+2));
@@ -100,7 +105,15 @@ extern void* Bsexp (int n, ...) {
 /* Tag checking */
 extern int Btag (void *d, int t) {
   data *r = TO_DATA(d);
-  return TAG(r->tag) == SEXP_TAG && TO_SEXP(d)->tag == t;
+
+  if (TAG(r->tag) == SEXP_TAG) {
+#ifdef DEBUG
+  fprintf(stderr, "Checking tags: expected %d and got %d\n", t, TO_SEXP(d)->tag);
+#endif
+    return TO_SEXP(d)->tag == t;
+  }
+
+  return 0;
 }
 
 /* Array store builtin; takes the number of indices, the value to store, the array, and the indices themselves */
@@ -132,6 +145,11 @@ extern void Bsta (int n, int v, void *s, ...) {
   
   if (TAG(a->tag) == STRING_TAG)((char*) s)[k] = (char) v;
   else ((int*) s)[k] = v;
+}
+
+extern int Bmatch_failed () {
+  fprintf (stderr, "No match\n");
+  exit (1);
 }
    
 /* Read builtin */

@@ -121,13 +121,25 @@ module Builtin =
     | "write"    -> (st, i, o @ [Value.to_int @@ List.hd args], None)
     | ".elem"    -> let [b; j] = args in
                     (st, i, o, let i = Value.to_int j in
+                               (* Printf.eprintf "Elem %d of %s\n" i (GT.show(Value.t) b); *)
                                Some (match b with
                                      | Value.String   s  -> Value.of_int @@ Char.code s.[i]
                                      | Value.Array    a  -> List.nth a i
                                      | Value.Sexp (_, a) -> List.nth a i
                                )
                     )         
-    | ".length"  -> (st, i, o, Some (Value.of_int (match List.hd args with Value.Array a -> List.length a | Value.String s -> String.length s)))
+    | ".length"  -> 
+      (
+        st, 
+        i, 
+        o, 
+        Some (Value.of_int (
+          match List.hd args with 
+          | Value.Array a     -> List.length a 
+          | Value.String s    -> String.length s
+          | Value.Sexp (_, a) -> List.length a
+        ))
+      )
     | ".array"   -> (st, i, o, Some (Value.of_array args))
     | "isArray"  -> let [a] = args in (st, i, o, Some (Value.of_int @@ match a with Value.Array  _ -> 1 | _ -> 0))
     | "isString" -> let [a] = args in (st, i, o, Some (Value.of_int @@ match a with Value.String _ -> 1 | _ -> 0))                     
@@ -296,12 +308,17 @@ module Stmt =
         (* Pattern parser *)                                 
         ostap (
           parse:      wildcard | sexp | identifier;
-          wildcard:   "-" { Wildcard };
+          wildcard:   "_" { Wildcard };
           sexp:       "`" tag:IDENT exprs:(-"(" !(Util.list)[parse] -")")? { 
             Sexp (tag, match exprs with None -> [] | Some r -> r) 
           };
           identifier: ident:IDENT { Ident ident }
         )
+
+        let rec cnt_vars p = match p with
+          | Wildcard        -> 0
+          | Ident _         -> 1
+          | Sexp (_, sub_p) -> List.fold_left (+) 0 @@ List.map cnt_vars sub_p
         
         let vars p = 
           transform(t) (object inherit [string list] @t[foldl] method c_Ident s _ name = name::s end) [] p
