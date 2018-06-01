@@ -74,7 +74,7 @@ let rec eval e c p =
           (State.update var x state, input, output)
         ) 
       | STA (var, cnt)  ->
-        let (idxs, (v :: stack')) = split cnt stack in
+        let ((v :: idxs), stack') = split (cnt + 1) stack in
         (cstack, stack', (Stmt.update state var v (rev idxs), input, output))
       | _               -> failwith "Not a basic instruction"
       in
@@ -90,7 +90,7 @@ let rec eval e c p =
     in
   let eval_control_flow ins e ((cstack, stack, ((state, input, output) as c)) as conf) p = 
     match ins with
-    | BEGIN (func_name, arg_names, local_names) -> 
+    | BEGIN (_, arg_names, local_names) -> 
       let (arg_vals, stack') = split (length arg_names) stack in
       let state' = State.enter state (arg_names @ local_names) in
       let state'' = fold_right2 State.update (rev arg_names) arg_vals state' in
@@ -183,7 +183,7 @@ let run p i =
    stack machine
 *)
 let compile (defs, p) = 
-  let label s = "L" ^ s in
+  let label s = if s.[0] = '.' then s else "L" ^ s in
   let env =
     object
       val mutable ls = 0
@@ -226,11 +226,10 @@ let compile (defs, p) =
     | Stmt.Assign (var, idxs, e) -> 
       (
         false, 
-        expr e @ 
         (
           match idxs with
-          | [] -> [ST var]
-          | _  -> (concat @@ map expr idxs) @ [STA (var, length idxs)]
+          | [] -> expr e @ [ST var]
+          | _  -> (concat @@ map expr idxs) @ expr e @ [STA (var, length idxs)]
         )
       )
     | Stmt.Seq (st1, st2)           -> 
@@ -272,8 +271,8 @@ let compile (defs, p) =
     | Stmt.Return optional_val      -> 
       (
         match optional_val with
-          | Some e -> (true, expr e @ [JMP l])
-          | _      -> (false, [JMP l])
+          | Some e -> (true, expr e @ [RET true])
+          | _      -> (false, [RET false])
       )
     | Stmt.Leave                 -> (false, [LEAVE])
     | Stmt.Case (e, cases)       ->
@@ -297,17 +296,18 @@ let compile (defs, p) =
   ) in
   let compile_def (name, (args, locals, stmt)) =
     let lend       = env#new_label in
+    let name_label = label name in
     let rets, code = compile_stmt lend stmt in
-    [LABEL name; BEGIN (name, args, locals)] @
+    [LABEL name_label; BEGIN (name_label, args, locals)] @
     code @
-    [LABEL lend; RET rets]
+    [LABEL lend; END]
   in
   let def_code =
     List.fold_left
-      (fun code (name, others) -> let code' = compile_def (label name, others) in code'::code)
+      (fun code (name, others) -> let code' = compile_def (name, others) in code'::code)
       []
       defs
   in
   let lend = env#new_label in
   let rets, code = compile_stmt lend p in
-  code @ [LABEL lend; RET rets] @ (List.concat def_code) 
+  code @ [LABEL lend; END] @ (List.concat def_code) 

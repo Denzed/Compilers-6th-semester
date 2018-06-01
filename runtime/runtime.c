@@ -105,6 +105,10 @@ extern int Btag (void *d, int t) {
 
 /* Array store builtin; takes the number of indices, the value to store, the array, and the indices themselves */
 extern void Bsta (int n, int v, void *s, ...) {
+#ifdef DEBUG
+  fprintf(stderr, "STA(%d) %llu[", n, s);
+#endif
+
   va_list args;
   int i, k;
   data *a;
@@ -113,11 +117,18 @@ extern void Bsta (int n, int v, void *s, ...) {
 
   for (i=0; i<n-1; i++) {
     k = va_arg(args, int);
+#ifdef DEBUG
+    fprintf(stderr, (i == 0 ? "%d" : ", %d"), k);
+#endif
     s = ((int**) s) [k];
   }
 
   k = va_arg(args, int);
   a = TO_DATA(s);
+
+#ifdef DEBUG
+  fprintf(stderr, "%s%d] = %d\n", (n == 1 ? "" : ", "), k, v);
+#endif
   
   if (TAG(a->tag) == STRING_TAG)((char*) s)[k] = (char) v;
   else ((int*) s)[k] = v;
